@@ -28,6 +28,7 @@ import {
   type MeshyRiggingRequest,
   type MeshyAnimationRequest,
   type MeshyTaskResponse,
+  type MeshyCreateTaskResponse,
 } from "./MeshyClient.js";
 import { meshyStatusToJobState } from "./meshyMapping.js";
 import {
@@ -121,6 +122,34 @@ export class MeshyProvider implements IAI3DProvider {
   }
 
   /**
+   * Extracts the task ID from a create-task response, failing loudly if it's
+   * missing rather than returning `undefined` for a caller to trip over later.
+   *
+   * This matters more than usual here: by the time this runs, Meshy has already
+   * created the task and spent the caller's credits (see `MeshyCreateTaskResponse`'s
+   * doc comment in MeshyClient.ts for the historical bug this guards against —
+   * `response.id` used to be read instead of `response.result`, which doesn't
+   * exist on create responses, so `taskId` was silently `undefined` and the
+   * failure only surfaced later as a confusing crash in `GenerationManager`,
+   * *after* the billable work had already happened). Throwing immediately here
+   * at least makes the failure obvious and immediate, right where it occurred.
+   */
+  private extractTaskId(
+    response: MeshyCreateTaskResponse,
+    endpointLabel: string,
+  ): string {
+    if (!response?.result) {
+      throw new Error(
+        `Meshy ${endpointLabel} response did not include a 'result' field ` +
+          `(task ID). The task may have still been created and credits spent — ` +
+          `check your Meshy dashboard / list_jobs before retrying. Raw response: ` +
+          `${JSON.stringify(response)}`,
+      );
+    }
+    return response.result;
+  }
+
+  /**
    * Text-to-3D preview generation (untextured mesh).
    * Returns the task ID for polling/status checks.
    */
@@ -144,7 +173,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.textTo3D(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "text-to-3d (preview)");
   }
 
   /**
@@ -166,7 +195,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.textTo3D(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "text-to-3d (refine)");
   }
 
   /**
@@ -200,7 +229,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.imageTo3D(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "image-to-3d");
   }
 
   /**
@@ -235,7 +264,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.multiImageTo3D(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "multi-image-to-3d");
   }
 
   /**
@@ -386,7 +415,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.rig(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "rigging");
   }
 
   /**
@@ -420,7 +449,7 @@ export class MeshyProvider implements IAI3DProvider {
     };
 
     const response = await this.client.animate(meshyRequest);
-    return response.id;
+    return this.extractTaskId(response, "animations");
   }
 
   /**

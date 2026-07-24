@@ -270,7 +270,7 @@ getJobMetadata(taskId: string): JobMetadata | undefined
 interface TextToPreviewRequest {
   prompt: string;                    // Required; 600 char max per Meshy
   negativePrompt?: string;           // Accepted but no-op on Meshy (documented)
-  modelType?: 'standard' | 'cute' | 'realastic'; // Meshy specific
+  modelType?: string;                // See "modelType values" note below — DO NOT guess this value
   targetFormats?: AssetType[];
   targetPolycount?: number;
   shouldRemesh?: boolean;
@@ -292,12 +292,14 @@ interface ImageToThreeDRequest {
   inputTaskId?: string;
   shouldTexture?: boolean;
   enablePbr?: boolean;
-  modelType?: 'standard' | 'smart-topology' | 'lowpoly';
+  modelType?: string;                // See "modelType values" note below — DO NOT guess this value
   // ... more parameters
 }
 
 // MultiImageToThreeDRequest: same fields as ImageToThreeD, but imageUrls: string[]
 ```
+
+**`modelType` values — this connector does not validate or hardcode them, and neither should you.** `modelType` is typed as a plain `string` everywhere in this codebase (`IAI3DProvider.ts`, `mcpServer.ts`'s zod schema) — there is no enum. An earlier version of this doc invented values (`'cute'`, `'realastic'`, `'smart-topology'`) that don't exist on Meshy's live API and will get a `400` (confirmed against the real `/openapi/v2/text-to-3d` endpoint: valid values there are `standard` and `lowpoly`, not the three previously documented here). Meshy's accepted values can differ per endpoint and change over time, so: check [Meshy's own API docs](https://docs.meshy.ai) for the current accepted values for the specific endpoint you're calling, rather than trusting a hardcoded list in this file. If you're extending this connector, resist the temptation to add a zod enum for `modelType` unless you're prepared to keep it in sync with Meshy's API — a `string` that occasionally 400s with a clear Meshy-provided message is safer than a stale enum that silently blocks valid values or (as happened here) documents invalid ones as if they were real.
 
 ### DownloadManager
 
@@ -841,6 +843,10 @@ This logic should live in `MeshyProvider` as a public helper method. It's a smal
 See [Module Layout](#module-layout) — with a single provider, `mcpServer.ts` constructs `MeshyProvider` directly rather than through a factory. Not a defect, just a "hasn't been needed yet" — see [Adding a New Provider](#adding-a-new-provider) step 4 for the recommended shape once a second provider lands.
 
 ### 3. Meshy API Limitations (Not Bugs)
+
+**Create-task responses are shaped differently from status responses — a real bug this connector shipped once, now fixed and worth knowing about if you touch `MeshyClient`/`MeshyProvider`.** The `POST` endpoints that create a task (`/openapi/v2/text-to-3d`, `/openapi/v1/image-to-3d`, `/openapi/v1/multi-image-to-3d`, `/openapi/v1/rigging`, `/openapi/v1/animations`) return `{ "result": "<taskId>" }` — just the ID, under a `result` key. The `GET .../:id` status endpoints, by contrast, return the full task object, which *does* have an `id` field. It's easy to assume both responses share a shape and read `.id` off the create response too — that field doesn't exist there, so `taskId` silently comes back `undefined`, and by the time anything notices (a downstream crash trying to use the ID), Meshy has already created the task and spent your credits. `MeshyClient.ts`'s `MeshyCreateTaskResponse` type and `MeshyProvider`'s `extractTaskId()` helper exist specifically to keep this fixed — if you add a new create-task endpoint, make sure it goes through the same `.result`-reading path and the same "throw immediately if missing" guard, not a fresh `.id` access.
+
+**`modelType` accepted values are provider- and endpoint-specific and not validated by this connector.** See the note under [GenerationManager's request interfaces](#api-reference) above — don't hardcode a guess; check Meshy's live docs for the endpoint you're calling.
 
 **Negative Prompt:** Meshy accepts a `negative_prompt` field in the API but it has no effect (deprecated). The connector accepts it for symmetry with other providers (Tripo, Luma, etc., may use it), but it's documented as a no-op for Meshy specifically.
 

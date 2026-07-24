@@ -168,6 +168,24 @@ export interface MeshyBalanceResponse {
 }
 
 /**
+ * Response shape for every task-creation POST endpoint (text-to-3d, image-to-3d,
+ * multi-image-to-3d, rigging, animations).
+ *
+ * IMPORTANT: unlike the GET .../:id status endpoints (which return a full
+ * `MeshyTaskResponse` with an `id` field), Meshy's create-task POST endpoints
+ * return only `{ "result": "<task_id>" }` — there is no `id` field on the create
+ * response. An earlier version of this client incorrectly read `.id` off the
+ * create response, which meant `taskId` was silently `undefined` after every
+ * successful generation call (the task had already been created and credits
+ * already spent by that point) — see `MeshyProvider`'s create-task methods,
+ * which now read `.result` and throw immediately if it's missing rather than
+ * letting `undefined` propagate to a confusing crash further up the call stack.
+ */
+export interface MeshyCreateTaskResponse {
+  result: string;
+}
+
+/**
  * Meshy list tasks response.
  */
 export interface MeshyListTasksResponse {
@@ -302,11 +320,12 @@ export class MeshyClient {
 
   /**
    * POST /openapi/v2/text-to-3d (preview or refine mode).
+   * Returns `{ result: taskId }` — see `MeshyCreateTaskResponse`'s doc comment.
    */
   async textTo3D(
     request: MeshyTextTo3DPreviewRequest | MeshyTextTo3DRefineRequest,
-  ): Promise<MeshyTaskResponse> {
-    return this.request<MeshyTaskResponse>(
+  ): Promise<MeshyCreateTaskResponse> {
+    return this.request<MeshyCreateTaskResponse>(
       "POST",
       "/openapi/v2/text-to-3d",
       request,
@@ -315,9 +334,12 @@ export class MeshyClient {
 
   /**
    * POST /openapi/v1/image-to-3d.
+   * Returns `{ result: taskId }` — see `MeshyCreateTaskResponse`'s doc comment.
    */
-  async imageTo3D(request: MeshyImageTo3DRequest): Promise<MeshyTaskResponse> {
-    return this.request<MeshyTaskResponse>(
+  async imageTo3D(
+    request: MeshyImageTo3DRequest,
+  ): Promise<MeshyCreateTaskResponse> {
+    return this.request<MeshyCreateTaskResponse>(
       "POST",
       "/openapi/v1/image-to-3d",
       request,
@@ -326,11 +348,12 @@ export class MeshyClient {
 
   /**
    * POST /openapi/v1/multi-image-to-3d.
+   * Returns `{ result: taskId }` — see `MeshyCreateTaskResponse`'s doc comment.
    */
   async multiImageTo3D(
     request: MeshyMultiImageTo3DRequest,
-  ): Promise<MeshyTaskResponse> {
-    return this.request<MeshyTaskResponse>(
+  ): Promise<MeshyCreateTaskResponse> {
+    return this.request<MeshyCreateTaskResponse>(
       "POST",
       "/openapi/v1/multi-image-to-3d",
       request,
@@ -339,9 +362,10 @@ export class MeshyClient {
 
   /**
    * POST /openapi/v1/rigging.
+   * Returns `{ result: taskId }` — see `MeshyCreateTaskResponse`'s doc comment.
    */
-  async rig(request: MeshyRiggingRequest): Promise<MeshyTaskResponse> {
-    return this.request<MeshyTaskResponse>(
+  async rig(request: MeshyRiggingRequest): Promise<MeshyCreateTaskResponse> {
+    return this.request<MeshyCreateTaskResponse>(
       "POST",
       "/openapi/v1/rigging",
       request,
@@ -350,9 +374,12 @@ export class MeshyClient {
 
   /**
    * POST /openapi/v1/animations.
+   * Returns `{ result: taskId }` — see `MeshyCreateTaskResponse`'s doc comment.
    */
-  async animate(request: MeshyAnimationRequest): Promise<MeshyTaskResponse> {
-    return this.request<MeshyTaskResponse>(
+  async animate(
+    request: MeshyAnimationRequest,
+  ): Promise<MeshyCreateTaskResponse> {
+    return this.request<MeshyCreateTaskResponse>(
       "POST",
       "/openapi/v1/animations",
       request,

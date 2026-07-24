@@ -61,6 +61,27 @@ export class GenerationManager {
   }
 
   /**
+   * Guards against a provider returning a falsy task ID after a create-task call
+   * has already succeeded (and, for paid providers, already spent credits). This
+   * is a defense-in-depth check: `MeshyProvider` already throws immediately if
+   * Meshy's response doesn't contain a task ID, but a provider bug of this exact
+   * shape (crashing on `taskId.slice(...)` well after the billable work happened,
+   * with no indication the task was actually created) is exactly the failure mode
+   * this project has already shipped once — see MeshyClient.ts's
+   * `MeshyCreateTaskResponse` doc comment for the history. Failing loudly and
+   * immediately here, for every provider, is cheap insurance against a repeat.
+   */
+  private assertTaskId(taskId: string, methodLabel: string): void {
+    if (!taskId) {
+      throw new Error(
+        `Provider "${this.provider.providerId}" returned an empty task ID from ` +
+          `${methodLabel}(). The task may have still been created (and any credits ` +
+          `spent) — check the provider's dashboard or list_jobs before retrying.`,
+      );
+    }
+  }
+
+  /**
    * Records a job in local memory and, if configured, the persistent job store.
    * Store failures are logged but never block the caller — the in-memory map is
    * always the source of truth for the current process.
@@ -104,6 +125,7 @@ export class GenerationManager {
       () => this.provider.textToPreview(request),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "textToPreview");
 
     // Record job metadata
     const jobMetadata: JobMetadata = {
@@ -161,6 +183,7 @@ export class GenerationManager {
       () => this.provider.textToRefine(refineRequest),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "textToRefine");
 
     // Record the refine job
     const refineJob: JobMetadata = {
@@ -194,6 +217,7 @@ export class GenerationManager {
       () => this.provider.imageToThreeD(request),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "imageToThreeD");
 
     const jobMetadata: JobMetadata = {
       jobId: this.generateJobId(),
@@ -226,6 +250,7 @@ export class GenerationManager {
       () => this.provider.multiImageToThreeD(request),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "multiImageToThreeD");
 
     const jobMetadata: JobMetadata = {
       jobId: this.generateJobId(),
@@ -270,6 +295,7 @@ export class GenerationManager {
       () => this.provider.rigModel!(request),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "rigModel");
 
     const jobMetadata: JobMetadata = {
       jobId: this.generateJobId(),
@@ -339,6 +365,7 @@ export class GenerationManager {
       () => this.provider.animateModel!(animRequest),
       this.retryConfig,
     );
+    this.assertTaskId(taskId, "animateModel");
 
     const jobMetadata: JobMetadata = {
       jobId: this.generateJobId(),

@@ -47,39 +47,40 @@ test("MeshyClient - balance endpoint returns correct value", async () => {
 });
 
 test("MeshyClient - textTo3D preview request succeeds", async () => {
-  const mockResponse = {
-    id: "task-123",
-    status: MeshyTaskStatus.PENDING,
-    progress: 0,
-  };
+  // REGRESSION: Meshy's real create-task response is `{ result: "<taskId>" }`,
+  // not `{ id: "<taskId>" }` — an earlier version of this test mocked the wrong
+  // shape (matching a since-fixed bug in MeshyProvider that read `.id` and got
+  // `undefined`, crashing later after the task had already been created and
+  // billed). This mock intentionally does NOT include an `id` field, so this
+  // test would fail loudly if that bug ever came back.
+  const mockResponse = { result: "task-123" };
   const restore = setupFetchMock(mockResponse);
   try {
     const client = new MeshyClient("msy_test_key_12345");
-    // MeshyClient.textTo3D() returns the full MeshyTaskResponse, not just the ID
-    // (extracting .id is MeshyProvider's job, one layer up) — check the .id field.
     const response = await client.textTo3D({
       mode: "preview",
       prompt: "A red ball",
     });
-    assert.equal(response.id, "task-123");
+    assert.equal(response.result, "task-123");
+    assert.equal(
+      (response as unknown as Record<string, unknown>).id,
+      undefined,
+    );
   } finally {
     restore();
   }
 });
 
 test("MeshyClient - imageTo3D request succeeds", async () => {
-  const mockResponse = {
-    id: "task-456",
-    status: MeshyTaskStatus.PENDING,
-    progress: 0,
-  };
+  // See the regression note on the textTo3D test above — same real API shape.
+  const mockResponse = { result: "task-456" };
   const restore = setupFetchMock(mockResponse);
   try {
     const client = new MeshyClient("msy_test_key_12345");
     const response = await client.imageTo3D({
       image_url: "https://example.com/image.png",
     });
-    assert.equal(response.id, "task-456");
+    assert.equal(response.result, "task-456");
   } finally {
     restore();
   }
@@ -195,11 +196,7 @@ test("MeshyClient - deleteTextTo3DTask makes DELETE request", async () => {
 });
 
 test("MeshyClient - multiImageTo3D accepts 1-4 images", async () => {
-  const mockResponse = {
-    id: "task-multi",
-    status: MeshyTaskStatus.PENDING,
-    progress: 0,
-  };
+  const mockResponse = { result: "task-multi" };
   const restore = setupFetchMock(mockResponse);
   try {
     const client = new MeshyClient("msy_test_key_12345");
@@ -210,18 +207,14 @@ test("MeshyClient - multiImageTo3D accepts 1-4 images", async () => {
         "https://example.com/img3.png",
       ],
     });
-    assert.equal(response.id, "task-multi");
+    assert.equal(response.result, "task-multi");
   } finally {
     restore();
   }
 });
 
 test("MeshyClient - rig and animate methods work", async () => {
-  const rigResponse = {
-    id: "rig-task-123",
-    status: MeshyTaskStatus.PENDING,
-    progress: 0,
-  };
+  const rigResponse = { result: "rig-task-123" };
   const restore = setupFetchMock(rigResponse);
   try {
     const client = new MeshyClient("msy_test_key_12345");
@@ -229,7 +222,22 @@ test("MeshyClient - rig and animate methods work", async () => {
       input_task_id: "model-task-123",
       height_meters: 1.7,
     });
-    assert.equal(rigResult.id, "rig-task-123");
+    assert.equal(rigResult.result, "rig-task-123");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyClient - animate method returns result field", async () => {
+  const animateResponse = { result: "anim-task-456" };
+  const restore = setupFetchMock(animateResponse);
+  try {
+    const client = new MeshyClient("msy_test_key_12345");
+    const animateResult = await client.animate({
+      rig_task_id: "rig-task-123",
+      action_id: "walk",
+    });
+    assert.equal(animateResult.result, "anim-task-456");
   } finally {
     restore();
   }

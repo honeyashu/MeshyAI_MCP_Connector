@@ -9,10 +9,37 @@ import { MeshyProvider } from "./MeshyProvider.js";
 import { AssetType } from "../../core/types.js";
 
 // Note: MeshyProvider constructs its own internal MeshyClient from an apiKey
-// (no dependency-injection seam for a mock client), so these tests exercise
+// (no dependency-injection seam for a mock client), so most tests below exercise
 // capabilities/providerId/static behavior directly rather than mocking MeshyClient.
-// Network-dependent methods (textToPreview, getJobStatus, etc.) aren't covered here;
-// see MeshyClient.test.ts for HTTP-layer coverage via a mocked global.fetch.
+// The network-dependent regression tests further down mock `global.fetch` directly
+// (same technique as MeshyClient.test.ts) since that's the only seam available
+// without a DI refactor — see the "REGRESSION" tests for the taskId/result bug
+// these were specifically added to catch.
+
+/**
+ * Mocks globalThis.fetch for a single JSON response. Mirrors the helper in
+ * MeshyClient.test.ts; duplicated here rather than shared since these are two
+ * genuinely separate test files/concerns (HTTP layer vs. provider layer).
+ */
+function setupFetchMock(
+  responseBody: unknown,
+  statusCode: number = 200,
+): () => void {
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    return {
+      ok: statusCode >= 200 && statusCode < 300,
+      status: statusCode,
+      statusText: statusCode === 200 ? "OK" : "Error",
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => responseBody,
+      text: async () => JSON.stringify(responseBody),
+    } as Response;
+  };
+  return () => {
+    global.fetch = originalFetch;
+  };
+}
 
 test("MeshyProvider - has correct providerId", async () => {
   const provider = new MeshyProvider("msy_test_key_12345");
@@ -50,16 +77,115 @@ test("MeshyProvider - capabilities reflect Meshy limitations", async () => {
 
 test("MeshyProvider - textToPreview returns task ID", async () => {
   const provider = new MeshyProvider("msy_test_key_12345");
-
-  // We can't easily mock the internal client here without refactoring,
-  // so this test validates the method signature and basic structure
   assert.equal(typeof provider.textToPreview, "function");
 });
 
 test("MeshyProvider - getJobStatus normalizes status to JobState", async () => {
-  // This would require proper mocking setup; simplified for now
   const provider = new MeshyProvider("msy_test_key_12345");
   assert.equal(typeof provider.getJobStatus, "function");
+});
+
+// --- REGRESSION: taskId/result field bug -----------------------------------
+//
+// Meshy's create-task POST endpoints return `{ result: "<taskId>" }`, not
+// `{ id: "<taskId>" }`. A shipped version of MeshyProvider read `.id` off these
+// responses, which doesn't exist there — so `taskId` was silently `undefined`
+// on every successful generation call, and the failure only surfaced later as
+// a crash in GenerationManager (`taskId.slice(...)`), *after* Meshy had already
+// created the task and spent the caller's credits. These tests mock the real
+// response shape (`result` only, no `id`) and would fail immediately if that
+// bug reappears in any of the six create-task methods below.
+
+test("MeshyProvider - textToPreview extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "preview-task-abc123" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.textToPreview({ prompt: "A red ball" });
+    assert.equal(taskId, "preview-task-abc123");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - textToPreview throws immediately (not later) if 'result' is missing (REGRESSION)", async () => {
+  // Simulates the exact historical bug shape: a 200 OK with no usable task ID.
+  const restore = setupFetchMock({ id: "some-other-field-not-result" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    await assert.rejects(
+      () => provider.textToPreview({ prompt: "A red ball" }),
+      /did not include a 'result' field/,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - textToRefine extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "refine-task-xyz789" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.textToRefine({
+      previewTaskId: "preview-task-abc123",
+    });
+    assert.equal(taskId, "refine-task-xyz789");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - imageToThreeD extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "image-task-111" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.imageToThreeD({
+      imageUrl: "https://example.com/image.png",
+    });
+    assert.equal(taskId, "image-task-111");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - multiImageToThreeD extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "multi-image-task-222" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.multiImageToThreeD({
+      imageUrls: ["https://example.com/a.png", "https://example.com/b.png"],
+    });
+    assert.equal(taskId, "multi-image-task-222");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - rigModel extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "rig-task-333" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.rigModel!({
+      inputTaskId: "model-task-123",
+      heightMeters: 1.7,
+    });
+    assert.equal(taskId, "rig-task-333");
+  } finally {
+    restore();
+  }
+});
+
+test("MeshyProvider - animateModel extracts taskId from 'result' field (REGRESSION)", async () => {
+  const restore = setupFetchMock({ result: "anim-task-444" });
+  try {
+    const provider = new MeshyProvider("msy_test_key_12345");
+    const taskId = await provider.animateModel!({
+      rigTaskId: "rig-task-333",
+      actionId: "walk",
+    });
+    assert.equal(taskId, "anim-task-444");
+  } finally {
+    restore();
+  }
 });
 
 test("MeshyProvider - testConnection validates API access", async () => {
